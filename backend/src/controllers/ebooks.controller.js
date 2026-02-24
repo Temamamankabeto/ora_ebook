@@ -116,12 +116,101 @@ export async function getEbookDetail(req, res) {
 
 export async function editorQueue(req, res) {
   const r = await q(
-    `SELECT e.*, u.full_name AS author_name
+    `WITH assignments AS (
+       SELECT
+         a.ebook_id,
+         a.assignment_id,
+         a.reviewer_id,
+         a.status AS assignment_status,
+         a.assigned_at,
+         a.due_at,
+         rv.full_name AS reviewer_name,
+         rv.email AS reviewer_email
+       FROM ebook_reviewer_assignments a
+       LEFT JOIN users rv ON rv.uuid = a.reviewer_id
+     ),
+     reviews AS (
+       SELECT
+         er.assignment_id,
+         er.recommendation,
+         er.submitted_at
+       FROM ebook_reviews er
+     ),
+     review_summary AS (
+       SELECT
+         a.ebook_id,
+
+         -- assignment counts
+         COUNT(*) FILTER (WHERE a.assignment_status = 'INVITED')::int AS invited_count,
+         COUNT(*) FILTER (WHERE a.assignment_status = 'ACCEPTED')::int AS accepted_count,
+         COUNT(*) FILTER (WHERE a.assignment_status = 'SUBMITTED')::int AS submitted_count,
+         COUNT(*) FILTER (WHERE a.assignment_status = 'CANCELLED')::int AS cancelled_count,
+
+         -- recommendation counts (only for submitted reviews)
+         COUNT(*) FILTER (WHERE rv.recommendation = 'ACCEPT')::int AS rec_accept,
+         COUNT(*) FILTER (WHERE rv.recommendation = 'MINOR')::int AS rec_minor,
+         COUNT(*) FILTER (WHERE rv.recommendation = 'MAJOR')::int AS rec_major,
+         COUNT(*) FILTER (WHERE rv.recommendation = 'REJECT')::int AS rec_reject,
+
+         MAX(rv.submitted_at) AS last_review_submitted_at
+       FROM assignments a
+       LEFT JOIN reviews rv ON rv.assignment_id = a.assignment_id
+       GROUP BY a.ebook_id
+     )
+     SELECT
+       e.ebook_id,
+       e.title,
+       e.status,
+       e.created_at,
+       e.updated_at,
+       e.author_id,
+       e.editor_id,
+       au.full_name AS author_name,
+
+       -- list of reviewer assignments (same as Step 1.3)
+       COALESCE(
+         json_agg(
+           json_build_object(
+             'assignment_id', a.assignment_id,
+             'reviewer_id', a.reviewer_id,
+             'reviewer_name', a.reviewer_name,
+             'reviewer_email', a.reviewer_email,
+             'status', a.assignment_status,
+             'assigned_at', a.assigned_at,
+             'due_at', a.due_at
+           )
+         ) FILTER (WHERE a.assignment_id IS NOT NULL),
+         '[]'::json
+       ) AS reviewer_assignments,
+
+       -- review summary (Step 1.6)
+       COALESCE(rs.invited_count, 0) AS invited_count,
+       COALESCE(rs.accepted_count, 0) AS accepted_count,
+       COALESCE(rs.submitted_count, 0) AS submitted_count,
+       COALESCE(rs.cancelled_count, 0) AS cancelled_count,
+
+       COALESCE(rs.rec_accept, 0) AS rec_accept,
+       COALESCE(rs.rec_minor, 0) AS rec_minor,
+       COALESCE(rs.rec_major, 0) AS rec_major,
+       COALESCE(rs.rec_reject, 0) AS rec_reject,
+
+       rs.last_review_submitted_at
+
      FROM ebooks e
-     JOIN users u ON u.uuid = e.author_id
+     JOIN users au ON au.uuid = e.author_id
+     LEFT JOIN assignments a ON a.ebook_id = e.ebook_id
+     LEFT JOIN review_summary rs ON rs.ebook_id = e.ebook_id
+
      WHERE e.status IN ('SUBMITTED','SCREENING','RETURNED_FOR_CORRECTION','UNDER_REVIEW','REVISION_REQUIRED','ACCEPTED')
+     GROUP BY
+       e.ebook_id, e.title, e.status, e.created_at, e.updated_at, e.author_id, e.editor_id,
+       au.full_name,
+       rs.invited_count, rs.accepted_count, rs.submitted_count, rs.cancelled_count,
+       rs.rec_accept, rs.rec_minor, rs.rec_major, rs.rec_reject,
+       rs.last_review_submitted_at
      ORDER BY e.updated_at DESC`
   );
+
   res.json({ success: true, data: r.rows });
 }
 

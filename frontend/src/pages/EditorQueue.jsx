@@ -65,7 +65,6 @@ export default function EditorQueuePage() {
   const doAssignGlobal = async (e) => {
     e.preventDefault();
     setErr("");
-
     if (!assign.ebook_id) return setErr("ebook_id is required");
     if (!assign.reviewer_id) return setErr("Please select a reviewer");
 
@@ -87,7 +86,6 @@ export default function EditorQueuePage() {
     setErr("");
     const reviewer_id = rowReviewer[ebook_id];
     const due_at = rowDueAt[ebook_id] || "";
-
     if (!reviewer_id) return setErr("Select a reviewer in the row dropdown first.");
 
     try {
@@ -117,6 +115,15 @@ export default function EditorQueuePage() {
     [reviewers, assign.reviewer_id]
   );
 
+  const formatDate = (d) => {
+    if (!d) return "-";
+    try {
+      return new Date(d).toLocaleString();
+    } catch {
+      return String(d);
+    }
+  };
+
   return (
     <>
       <Navbar />
@@ -127,8 +134,7 @@ export default function EditorQueuePage() {
         <div className="card">
           <p>
             <small>
-              Step 1.5: Cancelled reviewers can be re-assigned. Active assignments remain disabled.
-              Backend blocks assignment if ebook status is not reviewable.
+              Step 1.6: Review summary shows assignment counts + recommendations + last review time.
             </small>
           </p>
 
@@ -138,6 +144,7 @@ export default function EditorQueuePage() {
                 <th>Title</th>
                 <th>Author</th>
                 <th>Status</th>
+                <th style={{ minWidth: 240 }}>Review Summary</th>
                 <th style={{ minWidth: 380 }}>Row Assign Reviewer</th>
                 <th>Actions</th>
               </tr>
@@ -147,14 +154,14 @@ export default function EditorQueuePage() {
               {rows.map((r) => {
                 const assigned = Array.isArray(r.reviewer_assignments) ? r.reviewer_assignments : [];
 
-                // Build maps:
-                // active assigned => disable (INVITED, ACCEPTED, SUBMITTED)
-                // cancelled => allow (reassign)
+                // active vs cancelled logic
                 const activeAssignedIds = new Set(
-                  assigned.filter(a => ["INVITED", "ACCEPTED", "SUBMITTED"].includes(a.status)).map(a => a.reviewer_id)
+                  assigned
+                    .filter((a) => ["INVITED", "ACCEPTED", "SUBMITTED"].includes(a.status))
+                    .map((a) => a.reviewer_id)
                 );
                 const cancelledIds = new Set(
-                  assigned.filter(a => a.status === "CANCELLED").map(a => a.reviewer_id)
+                  assigned.filter((a) => a.status === "CANCELLED").map((a) => a.reviewer_id)
                 );
 
                 return (
@@ -169,12 +176,40 @@ export default function EditorQueuePage() {
                     <td><small>{r.author_name}</small></td>
                     <td><span className="badge">{r.status}</span></td>
 
+                    {/* Review summary */}
+                    <td>
+                      <div className="card" style={{ padding: 10, boxShadow: "none" }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <span className="badge">Invited: {r.invited_count ?? 0}</span>
+                          <span className="badge">Accepted: {r.accepted_count ?? 0}</span>
+                          <span className="badge">Submitted: {r.submitted_count ?? 0}</span>
+                          <span className="badge">Cancelled: {r.cancelled_count ?? 0}</span>
+                        </div>
+
+                        <div style={{ marginTop: 8 }}>
+                          <small>
+                            Recs — Accept: <strong>{r.rec_accept ?? 0}</strong>, Minor:{" "}
+                            <strong>{r.rec_minor ?? 0}</strong>, Major:{" "}
+                            <strong>{r.rec_major ?? 0}</strong>, Reject:{" "}
+                            <strong>{r.rec_reject ?? 0}</strong>
+                          </small>
+                        </div>
+
+                        <div style={{ marginTop: 6 }}>
+                          <small>Last review: {formatDate(r.last_review_submitted_at)}</small>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Row Assign */}
                     <td>
                       <div style={{ display: "grid", gap: 6 }}>
                         <select
                           className="input"
                           value={rowReviewer[r.ebook_id] || ""}
-                          onChange={(e) => setRowReviewer((m) => ({ ...m, [r.ebook_id]: e.target.value }))}
+                          onChange={(e) =>
+                            setRowReviewer((m) => ({ ...m, [r.ebook_id]: e.target.value }))
+                          }
                         >
                           <option value="">
                             {loadingReviewers ? "Loading reviewers..." : "Select reviewer"}
@@ -188,7 +223,7 @@ export default function EditorQueuePage() {
                               <option key={u.uuid} value={u.uuid} disabled={isActiveAssigned}>
                                 {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
                                 {isActiveAssigned ? " — ACTIVE ASSIGNMENT" : ""}
-                                {(!isActiveAssigned && wasCancelled) ? " — REASSIGN OK" : ""}
+                                {!isActiveAssigned && wasCancelled ? " — REASSIGN OK" : ""}
                               </option>
                             );
                           })}
@@ -199,13 +234,20 @@ export default function EditorQueuePage() {
                             className="input"
                             type="datetime-local"
                             value={rowDueAt[r.ebook_id] || ""}
-                            onChange={(e) => setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))}
+                            onChange={(e) =>
+                              setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))
+                            }
                           />
-                          <button className="btn secondary" type="button" onClick={() => doAssignRow(r.ebook_id)}>
+                          <button
+                            className="btn secondary"
+                            type="button"
+                            onClick={() => doAssignRow(r.ebook_id)}
+                          >
                             Assign / Reassign
                           </button>
                         </div>
 
+                        {/* Assigned list */}
                         <div style={{ marginTop: 6 }}>
                           {assigned.length === 0 ? (
                             <small>No reviewers assigned yet.</small>
@@ -225,8 +267,8 @@ export default function EditorQueuePage() {
                                   </div>
 
                                   <small>
-                                    Assigned: {a.assigned_at ? new Date(a.assigned_at).toLocaleString() : "-"}
-                                    {a.due_at ? ` • Due: ${new Date(a.due_at).toLocaleString()}` : ""}
+                                    Assigned: {formatDate(a.assigned_at)}
+                                    {a.due_at ? ` • Due: ${formatDate(a.due_at)}` : ""}
                                   </small>
 
                                   <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -248,6 +290,7 @@ export default function EditorQueuePage() {
                       </div>
                     </td>
 
+                    {/* Actions */}
                     <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button className="btn small" onClick={() => setStatus(r.ebook_id, "SCREENING", "SCREENING")}>
                         Screen
