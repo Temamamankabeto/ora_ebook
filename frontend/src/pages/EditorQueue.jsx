@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Navbar from "../components/Navbar.jsx";
 import { editorQueue, editorSetStatus } from "../api/ebooks.js";
-import { assignReviewer } from "../api/reviews.js";
+import { assignReviewer, cancelReviewerAssignment } from "../api/reviews.js";
 import { listReviewers } from "../api/users.js";
 import { Link } from "react-router-dom";
 
@@ -9,7 +9,7 @@ export default function EditorQueuePage() {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
-  // Global assign form (still available)
+  // Global assign form
   const [assign, setAssign] = useState({ ebook_id: "", reviewer_id: "", due_at: "" });
 
   // Reviewer search + list
@@ -18,14 +18,14 @@ export default function EditorQueuePage() {
   const [loadingReviewers, setLoadingReviewers] = useState(false);
 
   // Per-row assignment selections
-  const [rowReviewer, setRowReviewer] = useState({}); // { [ebook_id]: reviewer_uuid }
-  const [rowDueAt, setRowDueAt] = useState({});       // { [ebook_id]: "YYYY-MM-DDTHH:mm" }
+  const [rowReviewer, setRowReviewer] = useState({});
+  const [rowDueAt, setRowDueAt] = useState({});
 
   const load = async () => {
     setErr("");
     try {
       const r = await editorQueue();
-      setRows(r.data);
+      setRows(r.data || []);
     } catch (e) {
       setErr(e.message);
     }
@@ -51,7 +51,6 @@ export default function EditorQueuePage() {
     fetchReviewers("");
   }, []);
 
-  // debounce search
   useEffect(() => {
     const t = setTimeout(() => {
       fetchReviewers(reviewerSearch);
@@ -79,7 +78,7 @@ export default function EditorQueuePage() {
       await assignReviewer({
         ebook_id: assign.ebook_id,
         reviewer_id: assign.reviewer_id,
-        due_at: assign.due_at || ""
+        due_at: assign.due_at || "",
       });
       setAssign({ ebook_id: "", reviewer_id: "", due_at: "" });
       await load();
@@ -93,16 +92,22 @@ export default function EditorQueuePage() {
     const reviewer_id = rowReviewer[ebook_id];
     const due_at = rowDueAt[ebook_id] || "";
 
-    if (!reviewer_id) {
-      setErr("Select a reviewer in the row dropdown first.");
-      return;
-    }
+    if (!reviewer_id) return setErr("Select a reviewer in the row dropdown first.");
 
     try {
       await assignReviewer({ ebook_id, reviewer_id, due_at });
-      // Clear the row selection after assigning
       setRowReviewer((m) => ({ ...m, [ebook_id]: "" }));
       setRowDueAt((m) => ({ ...m, [ebook_id]: "" }));
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  const doCancel = async (assignment_id) => {
+    const reason = window.prompt("Reason for cancel (optional):") || "";
+    try {
+      await cancelReviewerAssignment(assignment_id, reason);
       await load();
     } catch (e) {
       setErr(e.message);
@@ -122,7 +127,12 @@ export default function EditorQueuePage() {
         {err && <div className="card" style={{ background: "#fff5f5" }}>{err}</div>}
 
         <div className="card">
-          <p><small>Row Assign lets you assign reviewers without copying ebook_id. Workload shows pending invites/accepted reviews.</small></p>
+          <p>
+            <small>
+              Row Assign lets you assign reviewers without copying ebook_id. You can also cancel an assignment.
+              Workload shows pending invites/accepted reviews. Assigned reviewers are listed per manuscript.
+            </small>
+          </p>
 
           <table>
             <thead>
@@ -130,76 +140,143 @@ export default function EditorQueuePage() {
                 <th>Title</th>
                 <th>Author</th>
                 <th>Status</th>
-                <th style={{minWidth: 320}}>Row Assign Reviewer</th>
+                <th style={{ minWidth: 380 }}>Row Assign Reviewer</th>
                 <th>Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.ebook_id}>
-                  <td><Link to={`/ebooks/${r.ebook_id}`}>{r.title}</Link></td>
-                  <td><small>{r.author_name}</small></td>
-                  <td><span className="badge">{r.status}</span></td>
+              {rows.map((r) => {
+                const assigned = Array.isArray(r.reviewer_assignments) ? r.reviewer_assignments : [];
+                const assignedIds = new Set(assigned.map((x) => x.reviewer_id));
 
-                  {/* Row Assign */}
-                  <td>
-                    <div style={{display:"grid", gap:6}}>
-                      <select
-                        className="input"
-                        value={rowReviewer[r.ebook_id] || ""}
-                        onChange={(e) =>
-                          setRowReviewer((m) => ({ ...m, [r.ebook_id]: e.target.value }))
-                        }
-                      >
-                        <option value="">
-                          {loadingReviewers ? "Loading reviewers..." : "Select reviewer"}
-                        </option>
-                        {reviewers.map((u) => (
-                          <option key={u.uuid} value={u.uuid}>
-                            {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
-                          </option>
-                        ))}
-                      </select>
-
-                      <div className="grid grid-2">
-                        <input
-                          className="input"
-                          type="datetime-local"
-                          value={rowDueAt[r.ebook_id] || ""}
-                          onChange={(e) =>
-                            setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))
-                          }
-                        />
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          onClick={() => doAssignRow(r.ebook_id)}
-                        >
-                          Assign
-                        </button>
+                return (
+                  <tr key={r.ebook_id}>
+                    <td>
+                      <Link to={`/ebooks/${r.ebook_id}`}>{r.title}</Link>
+                      <div>
+                        <small>
+                          ebook_id: <code>{r.ebook_id}</code>
+                        </small>
                       </div>
-                      <small>
-                        ebook_id: <code>{r.ebook_id}</code>
-                      </small>
-                    </div>
-                  </td>
+                    </td>
 
-                  <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button className="btn small" onClick={() => setStatus(r.ebook_id, "SCREENING", "SCREENING")}>Screen</button>
-                    <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "UNDER_REVIEW", "SEND_TO_REVIEW")}>Send to Review</button>
-                    <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MAJOR_REVISION")}>Major Rev</button>
-                    <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MINOR_REVISION")}>Minor Rev</button>
-                    <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "ACCEPTED", "ACCEPT")}>Accept</button>
-                    <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REJECTED", "REJECT")}>Reject</button>
-                  </td>
-                </tr>
-              ))}
+                    <td><small>{r.author_name}</small></td>
+                    <td><span className="badge">{r.status}</span></td>
+
+                    <td>
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <select
+                          className="input"
+                          value={rowReviewer[r.ebook_id] || ""}
+                          onChange={(e) => setRowReviewer((m) => ({ ...m, [r.ebook_id]: e.target.value }))}
+                        >
+                          <option value="">
+                            {loadingReviewers ? "Loading reviewers..." : "Select reviewer"}
+                          </option>
+
+                          {reviewers.map((u) => {
+                            const alreadyAssigned = assignedIds.has(u.uuid);
+                            return (
+                              <option key={u.uuid} value={u.uuid} disabled={alreadyAssigned}>
+                                {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
+                                {alreadyAssigned ? " — ALREADY ASSIGNED" : ""}
+                              </option>
+                            );
+                          })}
+                        </select>
+
+                        <div className="grid grid-2">
+                          <input
+                            className="input"
+                            type="datetime-local"
+                            value={rowDueAt[r.ebook_id] || ""}
+                            onChange={(e) => setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))}
+                          />
+                          <button className="btn secondary" type="button" onClick={() => doAssignRow(r.ebook_id)}>
+                            Assign
+                          </button>
+                        </div>
+
+                        <div style={{ marginTop: 6 }}>
+                          {assigned.length === 0 ? (
+                            <small>No reviewers assigned yet.</small>
+                          ) : (
+                            <div className="grid" style={{ gap: 6 }}>
+                              {assigned.map((a) => (
+                                <div
+                                  key={a.assignment_id}
+                                  className="card"
+                                  style={{ padding: 10, borderRadius: 10, boxShadow: "none" }}
+                                >
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                                    <div>
+                                      <strong>{a.reviewer_name}</strong> <small>({a.reviewer_email})</small>
+                                    </div>
+                                    <span className="badge">{a.status}</span>
+                                  </div>
+
+                                  <small>
+                                    Assigned: {a.assigned_at ? new Date(a.assigned_at).toLocaleString() : "-"}
+                                    {a.due_at ? ` • Due: ${new Date(a.due_at).toLocaleString()}` : ""}
+                                  </small>
+
+                                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    {a.status !== "CANCELLED" && (
+                                      <button
+                                        className="btn secondary small"
+                                        type="button"
+                                        onClick={() => doCancel(a.assignment_id)}
+                                      >
+                                        Cancel assignment
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button className="btn small" onClick={() => setStatus(r.ebook_id, "SCREENING", "SCREENING")}>
+                        Screen
+                      </button>
+                      <button
+                        className="btn secondary small"
+                        onClick={() => setStatus(r.ebook_id, "UNDER_REVIEW", "SEND_TO_REVIEW")}
+                      >
+                        Send to Review
+                      </button>
+                      <button
+                        className="btn secondary small"
+                        onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MAJOR_REVISION")}
+                      >
+                        Major Rev
+                      </button>
+                      <button
+                        className="btn secondary small"
+                        onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MINOR_REVISION")}
+                      >
+                        Minor Rev
+                      </button>
+                      <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "ACCEPTED", "ACCEPT")}>
+                        Accept
+                      </button>
+                      <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REJECTED", "REJECT")}>
+                        Reject
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        {/* Global Assign (still useful sometimes) */}
+        {/* Global Assign */}
         <div className="card" style={{ marginTop: 12 }}>
           <h3 style={{ marginTop: 0 }}>Assign Reviewer (Global Form)</h3>
 

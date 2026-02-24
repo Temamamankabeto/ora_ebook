@@ -47,3 +47,45 @@ export async function listUsers(req, res) {
 
   res.json({ success: true, data: r.rows });
 }
+
+export async function editorQueue(req, res) {
+  const r = await q(
+    `SELECT
+        e.ebook_id,
+        e.title,
+        e.status,
+        e.created_at,
+        e.updated_at,
+        e.author_id,
+        e.editor_id,
+        u.full_name AS author_name,
+
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'assignment_id', a.assignment_id,
+              'reviewer_id', rv.uuid,
+              'reviewer_name', rv.full_name,
+              'reviewer_email', rv.email,
+              'status', a.status,
+              'assigned_at', a.assigned_at,
+              'due_at', a.due_at
+            )
+          ) FILTER (WHERE a.assignment_id IS NOT NULL),
+          '[]'::json
+        ) AS reviewer_assignments
+
+     FROM ebooks e
+     JOIN users u ON u.uuid = e.author_id
+     LEFT JOIN ebook_reviewer_assignments a ON a.ebook_id = e.ebook_id
+     LEFT JOIN users rv ON rv.uuid = a.reviewer_id
+
+     WHERE e.status IN ('SUBMITTED','SCREENING','RETURNED_FOR_CORRECTION','UNDER_REVIEW','REVISION_REQUIRED','ACCEPTED')
+     GROUP BY
+       e.ebook_id, e.title, e.status, e.created_at, e.updated_at, e.author_id, e.editor_id,
+       u.full_name
+     ORDER BY e.updated_at DESC`
+  );
+
+  res.json({ success: true, data: r.rows });
+}

@@ -21,6 +21,42 @@ export async function assignReviewer(req, res) {
   res.json({ success: true });
 }
 
+export async function cancelAssignment(req, res) {
+  const editorId = req.user.uuid;
+  const { assignment_id } = req.params;
+  const { reason } = req.body || {};
+
+  const a = await q(
+    `SELECT assignment_id, ebook_id, status
+     FROM ebook_reviewer_assignments
+     WHERE assignment_id=$1`,
+    [assignment_id]
+  );
+
+  if (!a.rowCount) return res.status(404).json({ success: false, message: "Assignment not found" });
+
+  // mark cancelled
+  await q(
+    `UPDATE ebook_reviewer_assignments
+     SET status='CANCELLED'
+     WHERE assignment_id=$1`,
+    [assignment_id]
+  );
+
+  // add workflow note (optional but useful)
+  await q(
+    `INSERT INTO ebook_workflow_history(ebook_id, previous_status, new_status, changed_by, comments)
+     VALUES($1, NULL, (SELECT status FROM ebooks WHERE ebook_id=$1), $2, $3)`,
+    [
+      a.rows[0].ebook_id,
+      editorId,
+      reason ? `Reviewer assignment cancelled: ${reason}` : "Reviewer assignment cancelled",
+    ]
+  );
+
+  res.json({ success: true });
+}
+
 export async function myReviewQueue(req, res) {
   const reviewerId = req.user.uuid;
   const r = await q(
@@ -38,12 +74,19 @@ export async function acceptInvite(req, res) {
   const reviewerId = req.user.uuid;
   const { assignment_id } = req.params;
 
-  const a = await q(`SELECT reviewer_id FROM ebook_reviewer_assignments WHERE assignment_id=$1`, [assignment_id]);
-  if (!a.rowCount) return res.status(404).json({ success:false, message:"Not found" });
-  if (a.rows[0].reviewer_id !== reviewerId) return res.status(403).json({ success:false, message:"Forbidden" });
+  const a = await q(
+    `SELECT reviewer_id, status
+     FROM ebook_reviewer_assignments
+     WHERE assignment_id=$1`,
+    [assignment_id]
+  );
+
+  if (!a.rowCount) return res.status(404).json({ success: false, message: "Not found" });
+  if (a.rows[0].reviewer_id !== reviewerId) return res.status(403).json({ success: false, message: "Forbidden" });
+  if (a.rows[0].status === "CANCELLED") return res.status(400).json({ success: false, message: "Assignment cancelled" });
 
   await q(`UPDATE ebook_reviewer_assignments SET status='ACCEPTED' WHERE assignment_id=$1`, [assignment_id]);
-  res.json({ success:true });
+  res.json({ success: true });
 }
 
 export async function submitReview(req, res) {
@@ -54,6 +97,7 @@ export async function submitReview(req, res) {
   const a = await q(`SELECT * FROM ebook_reviewer_assignments WHERE assignment_id=$1`, [assignment_id]);
   if (!a.rowCount) return res.status(404).json({ success: false, message: "Assignment not found" });
   if (a.rows[0].reviewer_id !== reviewerId) return res.status(403).json({ success: false, message: "Forbidden" });
+  if (a.rows[0].status === "CANCELLED") return res.status(400).json({ success: false, message: "Assignment cancelled" });
 
   await q("BEGIN");
   try {
