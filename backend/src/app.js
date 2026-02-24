@@ -10,6 +10,7 @@ import reviewRoutes from "./routes/reviews.routes.js";
 import financeRoutes from "./routes/finance.routes.js";
 import productionRoutes from "./routes/production.routes.js";
 import publicRoutes from "./routes/public.routes.js";
+import usersRoutes from "./routes/users.routes.js";
 
 const app = express();
 app.use(cors());
@@ -27,5 +28,6 @@ app.use("/api/reviews", reviewRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/production", productionRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/users", usersRoutes);
 
 export default app;
