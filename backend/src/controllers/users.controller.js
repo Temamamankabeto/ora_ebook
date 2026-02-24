@@ -3,7 +3,6 @@ import { q } from "../db/pool.js";
 export async function listUsers(req, res) {
   const role = (req.query.role || "").trim();
   const search = (req.query.q || "").trim();
-
   const like = search ? `%${search}%` : null;
 
   // If role provided, filter by role
@@ -19,11 +18,9 @@ export async function listUsers(req, res) {
        JOIN user_roles ur ON ur.user_id = u.uuid
        JOIN roles ro ON ro.uuid = ur.role_id
        LEFT JOIN (
-         SELECT
-           reviewer_id,
-           COUNT(*) AS pending_count
+         SELECT reviewer_id, COUNT(*) AS pending_count
          FROM ebook_reviewer_assignments
-         WHERE status IN ('INVITED','ACCEPTED')  -- pending review work
+         WHERE status IN ('INVITED','ACCEPTED')
          GROUP BY reviewer_id
        ) p ON p.reviewer_id = u.uuid
        WHERE ro.name = $1
@@ -32,10 +29,11 @@ export async function listUsers(req, res) {
        LIMIT 200`,
       [role, like]
     );
+
     return res.json({ success: true, data: r.rows });
   }
 
-  // fallback: list all users (still protected by RBAC)
+  // fallback: list all users
   const r = await q(
     `SELECT uuid, full_name, email
      FROM users
@@ -47,6 +45,7 @@ export async function listUsers(req, res) {
 
   res.json({ success: true, data: r.rows });
 }
+
 
 export async function editorQueue(req, res) {
   const r = await q(

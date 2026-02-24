@@ -9,15 +9,12 @@ export default function EditorQueuePage() {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
-  // Global assign form
   const [assign, setAssign] = useState({ ebook_id: "", reviewer_id: "", due_at: "" });
 
-  // Reviewer search + list
   const [reviewerSearch, setReviewerSearch] = useState("");
   const [reviewers, setReviewers] = useState([]);
   const [loadingReviewers, setLoadingReviewers] = useState(false);
 
-  // Per-row assignment selections
   const [rowReviewer, setRowReviewer] = useState({});
   const [rowDueAt, setRowDueAt] = useState({});
 
@@ -52,9 +49,7 @@ export default function EditorQueuePage() {
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      fetchReviewers(reviewerSearch);
-    }, 250);
+    const t = setTimeout(() => fetchReviewers(reviewerSearch), 250);
     return () => clearTimeout(t);
   }, [reviewerSearch]);
 
@@ -82,6 +77,7 @@ export default function EditorQueuePage() {
       });
       setAssign({ ebook_id: "", reviewer_id: "", due_at: "" });
       await load();
+      alert("Assigned successfully");
     } catch (e) {
       setErr(e.message);
     }
@@ -99,6 +95,7 @@ export default function EditorQueuePage() {
       setRowReviewer((m) => ({ ...m, [ebook_id]: "" }));
       setRowDueAt((m) => ({ ...m, [ebook_id]: "" }));
       await load();
+      alert("Assigned successfully");
     } catch (e) {
       setErr(e.message);
     }
@@ -109,6 +106,7 @@ export default function EditorQueuePage() {
     try {
       await cancelReviewerAssignment(assignment_id, reason);
       await load();
+      alert("Cancelled");
     } catch (e) {
       setErr(e.message);
     }
@@ -129,8 +127,8 @@ export default function EditorQueuePage() {
         <div className="card">
           <p>
             <small>
-              Row Assign lets you assign reviewers without copying ebook_id. You can also cancel an assignment.
-              Workload shows pending invites/accepted reviews. Assigned reviewers are listed per manuscript.
+              Step 1.5: Cancelled reviewers can be re-assigned. Active assignments remain disabled.
+              Backend blocks assignment if ebook status is not reviewable.
             </small>
           </p>
 
@@ -148,16 +146,23 @@ export default function EditorQueuePage() {
             <tbody>
               {rows.map((r) => {
                 const assigned = Array.isArray(r.reviewer_assignments) ? r.reviewer_assignments : [];
-                const assignedIds = new Set(assigned.map((x) => x.reviewer_id));
+
+                // Build maps:
+                // active assigned => disable (INVITED, ACCEPTED, SUBMITTED)
+                // cancelled => allow (reassign)
+                const activeAssignedIds = new Set(
+                  assigned.filter(a => ["INVITED", "ACCEPTED", "SUBMITTED"].includes(a.status)).map(a => a.reviewer_id)
+                );
+                const cancelledIds = new Set(
+                  assigned.filter(a => a.status === "CANCELLED").map(a => a.reviewer_id)
+                );
 
                 return (
                   <tr key={r.ebook_id}>
                     <td>
                       <Link to={`/ebooks/${r.ebook_id}`}>{r.title}</Link>
                       <div>
-                        <small>
-                          ebook_id: <code>{r.ebook_id}</code>
-                        </small>
+                        <small>ebook_id: <code>{r.ebook_id}</code></small>
                       </div>
                     </td>
 
@@ -176,11 +181,14 @@ export default function EditorQueuePage() {
                           </option>
 
                           {reviewers.map((u) => {
-                            const alreadyAssigned = assignedIds.has(u.uuid);
+                            const isActiveAssigned = activeAssignedIds.has(u.uuid);
+                            const wasCancelled = cancelledIds.has(u.uuid);
+
                             return (
-                              <option key={u.uuid} value={u.uuid} disabled={alreadyAssigned}>
+                              <option key={u.uuid} value={u.uuid} disabled={isActiveAssigned}>
                                 {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
-                                {alreadyAssigned ? " — ALREADY ASSIGNED" : ""}
+                                {isActiveAssigned ? " — ACTIVE ASSIGNMENT" : ""}
+                                {(!isActiveAssigned && wasCancelled) ? " — REASSIGN OK" : ""}
                               </option>
                             );
                           })}
@@ -194,7 +202,7 @@ export default function EditorQueuePage() {
                             onChange={(e) => setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))}
                           />
                           <button className="btn secondary" type="button" onClick={() => doAssignRow(r.ebook_id)}>
-                            Assign
+                            Assign / Reassign
                           </button>
                         </div>
 
@@ -244,22 +252,13 @@ export default function EditorQueuePage() {
                       <button className="btn small" onClick={() => setStatus(r.ebook_id, "SCREENING", "SCREENING")}>
                         Screen
                       </button>
-                      <button
-                        className="btn secondary small"
-                        onClick={() => setStatus(r.ebook_id, "UNDER_REVIEW", "SEND_TO_REVIEW")}
-                      >
+                      <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "UNDER_REVIEW", "SEND_TO_REVIEW")}>
                         Send to Review
                       </button>
-                      <button
-                        className="btn secondary small"
-                        onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MAJOR_REVISION")}
-                      >
+                      <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MAJOR_REVISION")}>
                         Major Rev
                       </button>
-                      <button
-                        className="btn secondary small"
-                        onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MINOR_REVISION")}
-                      >
+                      <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "REVISION_REQUIRED", "MINOR_REVISION")}>
                         Minor Rev
                       </button>
                       <button className="btn secondary small" onClick={() => setStatus(r.ebook_id, "ACCEPTED", "ACCEPT")}>
@@ -328,7 +327,7 @@ export default function EditorQueuePage() {
             )}
 
             <div>
-              <button className="btn" type="submit">Assign</button>
+              <button className="btn" type="submit">Assign / Reassign</button>
             </div>
           </form>
         </div>
