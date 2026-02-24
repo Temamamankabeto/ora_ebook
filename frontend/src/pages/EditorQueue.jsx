@@ -9,10 +9,17 @@ export default function EditorQueuePage() {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
+  // Global assign form (still available)
   const [assign, setAssign] = useState({ ebook_id: "", reviewer_id: "", due_at: "" });
+
+  // Reviewer search + list
   const [reviewerSearch, setReviewerSearch] = useState("");
   const [reviewers, setReviewers] = useState([]);
   const [loadingReviewers, setLoadingReviewers] = useState(false);
+
+  // Per-row assignment selections
+  const [rowReviewer, setRowReviewer] = useState({}); // { [ebook_id]: reviewer_uuid }
+  const [rowDueAt, setRowDueAt] = useState({});       // { [ebook_id]: "YYYY-MM-DDTHH:mm" }
 
   const load = async () => {
     setErr("");
@@ -24,19 +31,16 @@ export default function EditorQueuePage() {
     }
   };
 
-  // initial load
   useEffect(() => {
     load();
   }, []);
 
-  // load reviewers (initial + search)
   const fetchReviewers = async (search = "") => {
     setLoadingReviewers(true);
     try {
       const r = await listReviewers(search);
       setReviewers(r.data || []);
     } catch (e) {
-      // don't crash editor page if reviewer list fails
       console.warn("Failed to load reviewers:", e.message);
     } finally {
       setLoadingReviewers(false);
@@ -47,7 +51,7 @@ export default function EditorQueuePage() {
     fetchReviewers("");
   }, []);
 
-  // lightweight debounce (no library)
+  // debounce search
   useEffect(() => {
     const t = setTimeout(() => {
       fetchReviewers(reviewerSearch);
@@ -64,7 +68,7 @@ export default function EditorQueuePage() {
     }
   };
 
-  const doAssign = async (e) => {
+  const doAssignGlobal = async (e) => {
     e.preventDefault();
     setErr("");
 
@@ -84,6 +88,27 @@ export default function EditorQueuePage() {
     }
   };
 
+  const doAssignRow = async (ebook_id) => {
+    setErr("");
+    const reviewer_id = rowReviewer[ebook_id];
+    const due_at = rowDueAt[ebook_id] || "";
+
+    if (!reviewer_id) {
+      setErr("Select a reviewer in the row dropdown first.");
+      return;
+    }
+
+    try {
+      await assignReviewer({ ebook_id, reviewer_id, due_at });
+      // Clear the row selection after assigning
+      setRowReviewer((m) => ({ ...m, [ebook_id]: "" }));
+      setRowDueAt((m) => ({ ...m, [ebook_id]: "" }));
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
   const selectedReviewer = useMemo(
     () => reviewers.find((r) => r.uuid === assign.reviewer_id),
     [reviewers, assign.reviewer_id]
@@ -97,7 +122,7 @@ export default function EditorQueuePage() {
         {err && <div className="card" style={{ background: "#fff5f5" }}>{err}</div>}
 
         <div className="card">
-          <p><small>Actions: screening, send to review, request revision, accept/reject.</small></p>
+          <p><small>Row Assign lets you assign reviewers without copying ebook_id. Workload shows pending invites/accepted reviews.</small></p>
 
           <table>
             <thead>
@@ -105,25 +130,59 @@ export default function EditorQueuePage() {
                 <th>Title</th>
                 <th>Author</th>
                 <th>Status</th>
-                <th>Quick Assign</th>
+                <th style={{minWidth: 320}}>Row Assign Reviewer</th>
                 <th>Actions</th>
               </tr>
             </thead>
+
             <tbody>
-              {rows.map(r => (
+              {rows.map((r) => (
                 <tr key={r.ebook_id}>
                   <td><Link to={`/ebooks/${r.ebook_id}`}>{r.title}</Link></td>
                   <td><small>{r.author_name}</small></td>
                   <td><span className="badge">{r.status}</span></td>
 
-                  {/* Quick Assign: auto-fill ebook_id */}
+                  {/* Row Assign */}
                   <td>
-                    <button
-                      className="btn secondary small"
-                      onClick={() => setAssign((a) => ({ ...a, ebook_id: r.ebook_id }))}
-                    >
-                      Use this ebook_id
-                    </button>
+                    <div style={{display:"grid", gap:6}}>
+                      <select
+                        className="input"
+                        value={rowReviewer[r.ebook_id] || ""}
+                        onChange={(e) =>
+                          setRowReviewer((m) => ({ ...m, [r.ebook_id]: e.target.value }))
+                        }
+                      >
+                        <option value="">
+                          {loadingReviewers ? "Loading reviewers..." : "Select reviewer"}
+                        </option>
+                        {reviewers.map((u) => (
+                          <option key={u.uuid} value={u.uuid}>
+                            {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="grid grid-2">
+                        <input
+                          className="input"
+                          type="datetime-local"
+                          value={rowDueAt[r.ebook_id] || ""}
+                          onChange={(e) =>
+                            setRowDueAt((m) => ({ ...m, [r.ebook_id]: e.target.value }))
+                          }
+                        />
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() => doAssignRow(r.ebook_id)}
+                        >
+                          Assign
+                        </button>
+                      </div>
+                      <small>
+                        ebook_id: <code>{r.ebook_id}</code>
+                      </small>
+                    </div>
                   </td>
 
                   <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -140,23 +199,23 @@ export default function EditorQueuePage() {
           </table>
         </div>
 
-        {/* Assign reviewer with search + dropdown */}
+        {/* Global Assign (still useful sometimes) */}
         <div className="card" style={{ marginTop: 12 }}>
-          <h3 style={{ marginTop: 0 }}>Assign Reviewer</h3>
+          <h3 style={{ marginTop: 0 }}>Assign Reviewer (Global Form)</h3>
 
-          <form className="grid" onSubmit={doAssign}>
+          <form className="grid" onSubmit={doAssignGlobal}>
             <div className="grid grid-2">
               <input
                 className="input"
-                placeholder="ebook_id (click 'Use this ebook_id' from table)"
+                placeholder="ebook_id"
                 value={assign.ebook_id}
-                onChange={e => setAssign({ ...assign, ebook_id: e.target.value })}
+                onChange={(e) => setAssign({ ...assign, ebook_id: e.target.value })}
               />
               <input
                 className="input"
                 placeholder="due_at (optional ISO timestamp)"
                 value={assign.due_at}
-                onChange={e => setAssign({ ...assign, due_at: e.target.value })}
+                onChange={(e) => setAssign({ ...assign, due_at: e.target.value })}
               />
             </div>
 
@@ -178,7 +237,7 @@ export default function EditorQueuePage() {
                 </option>
                 {reviewers.map((u) => (
                   <option key={u.uuid} value={u.uuid}>
-                    {u.full_name} — {u.email}
+                    {u.full_name} — {u.email} (pending: {u.pending_count ?? 0})
                   </option>
                 ))}
               </select>
@@ -186,7 +245,8 @@ export default function EditorQueuePage() {
 
             {selectedReviewer && (
               <small>
-                Selected: <strong>{selectedReviewer.full_name}</strong> ({selectedReviewer.email})
+                Selected: <strong>{selectedReviewer.full_name}</strong> ({selectedReviewer.email}) — pending:{" "}
+                <strong>{selectedReviewer.pending_count ?? 0}</strong>
               </small>
             )}
 
