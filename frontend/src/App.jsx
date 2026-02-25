@@ -13,6 +13,8 @@ import ReviewQueue from "./pages/ReviewQueue.jsx";
 import FinanceQueue from "./pages/FinanceQueue.jsx";
 import ProductionQueue from "./pages/ProductionQueue.jsx";
 import PublicLibrary from "./pages/PublicLibrary.jsx";
+// import FinanceDashboard from './pages/FinanceDashboard';
+
 
 export default function App() {
   return (
@@ -34,6 +36,9 @@ export default function App() {
         <Route path="/reviewer/queue" element={<ProtectedRoute><ReviewQueue /></ProtectedRoute>} />
         <Route path="/finance/queue" element={<ProtectedRoute><FinanceQueue /></ProtectedRoute>} />
         <Route path="/production/queue" element={<ProtectedRoute><ProductionQueue /></ProtectedRoute>} />
+
+        {/* <Route path="/finance" element={<PrivateRoute roles={['finance_officer', 'admin']}><FinanceDashboard /></PrivateRoute>} /> */}
+
 
         <Route path="*" element={<Navigate to="/library" replace />} />
       </Routes>

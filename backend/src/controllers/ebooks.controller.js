@@ -296,4 +296,36 @@ export async function submitRevision(req, res) {
     console.error(e);
     res.status(500).json({ success:false, message:"Revision failed" });
   }
+
+
+  
+}
+export async function getEbookReviews(req, res) {
+  const { id } = req.params;
+
+  const r = await q(
+    `SELECT
+       a.assignment_id,
+       a.ebook_id,
+       a.status AS assignment_status,
+       a.assigned_at,
+       a.due_at,
+
+       u.uuid AS reviewer_id,
+       u.full_name AS reviewer_name,
+       u.email AS reviewer_email,
+
+       rv.recommendation,
+       rv.comments_to_author,
+       rv.confidential_comments_to_editor,
+       rv.submitted_at
+     FROM ebook_reviewer_assignments a
+     JOIN users u ON u.uuid = a.reviewer_id
+     LEFT JOIN ebook_reviews rv ON rv.assignment_id = a.assignment_id
+     WHERE a.ebook_id = $1
+     ORDER BY rv.submitted_at DESC NULLS LAST, a.assigned_at DESC`,
+    [id]
+  );
+
+  res.json({ success: true, data: r.rows });
 }
